@@ -1,0 +1,41 @@
+name: secure-pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: nothing beyond what's needed
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write      # needed to sign attestations (keyless, via Sigstore)
+      attestations: write  # needed to store the attestation on GitHub
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Scan SBOM for vulnerabilities (Grype)
+        uses: anchore/scan-action@v6
+        with:
+          sbom: sbom.spdx.json
+          fail-build: true
+          severity-cutoff: high
+
+      - name: Sign & attest the SBOM
+        if: github.event_name == 'push'
+        uses: actions/attest-sbom@v2
+        with:
+          subject-path: requirements.txt
+          sbom-path: sbom.spdx.json
